@@ -88,7 +88,8 @@ class Replica:
                     continue
 
                 # received votes from others
-                if msg['type'] == "requestVote" and msg['vote']:
+                print("Received message '%s'" % (msg,), True)
+                if msg['type'] is "requestVote" and msg['vote']:
                     self.received_votes += 1
                 if (msg['type'] is "requestVote" or msg['type'] is "appendEntry") and msg['term'] > self.currentTerm:
                     self.state = "Follower"
@@ -171,7 +172,7 @@ class Replica:
     def follower_request_vote(self, message):
         message = {"src": self.id, "dst": message['src'], "type": "requestVote", "leader": self.leaderID, "vote": False,"term": self.currentTerm}
 
-        if not self.votedFor or self.currentTerm > message["term"] or len(self.log) > message['lastLogIndex']:
+        if self.votedFor or self.currentTerm > message["term"] or len(self.log) > message['lastLogIndex']:
             # reject vote
             self.send(message)
             return
