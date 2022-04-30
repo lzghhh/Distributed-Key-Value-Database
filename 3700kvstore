@@ -80,6 +80,7 @@ class Replica:
                     self.state = "Candidate"
                     self.candidate_request_vote()
 
+
             elif self.state is "Candidate":
                 if msg['type'] is "requestVote" and msg['leader'] is not self.id:
                     message = {"src": self.id, "dst": message['src'], "type": "requestVote", "leader": self.leaderID,
