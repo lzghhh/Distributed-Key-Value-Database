@@ -47,6 +47,9 @@ class Replica:
         self.total_replica_num = len(others)
         # received votes must be more than half of total replica numbers
         self.received_votes = 0
+        # received append message for append entry RPC
+        self.pending_request = []
+
 
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.bind(('localhost', 0))
@@ -86,6 +89,7 @@ class Replica:
 
                 if self.received_votes >= self.total_replica_num / 2:
                     self.state = "Leader"
+                    self.received_votes = 0
                     # broadcast new leader established
                     self.empty_append_entries()
 
@@ -98,29 +102,50 @@ class Replica:
                     user = msg['user']
                     operation = msg['operation']
                     if operation is "get":
-                        self.client_get(msg,user)
+                        self.client_get(msg, user)
                     elif operation is "put":
-                        self.client_put(msg)
+                        self.client_put(msg, user)
                 # if leader received append entry RPC with ok message, then increment its count.
                 # when the majority of replicas replied ok, commit and reply the client.
                 # meanwhile, indefinitely retry any replica that times out or failed.
                 # Currently believe all append entry is delievered and successed.
                 # if msg['type'] is "appendEntry" and msg['success'] is True:
                     # how to know which replica has replied yes while keep track of all those replied no?
-
-                if msg['type'] is "appendEntry" and msg['success'] is False:
-                    # leader finds out that it is outdated and return back to follower.
-                    if self.currentTerm < msg['term']:
-                        self.state = "Follower"
-                        self.currentTerm = msg['term']
-
+                if msg['type'] is "appendEntry":
+                    self.leader_reply_client(message)
 
             # the get and put are shared functionalities among all states
             if msg['type'] == "put":
-                self.client_put(msg)
+                self.client_put(msg,None)
             if msg['type'] == "get":
                 self.client_get(msg,None)
             print("Received message '%s'" % (msg,), True)
+
+    def leader_reply_client(self,message):
+        # leader finds out that it is outdated and return back to follower.
+        if self.currentTerm < message['term']:
+            self.state = "Follower"
+            self.currentTerm = message['term']
+
+        reply = {"src": self.id, "dst": message['user'],
+                   "type": "ok", "leader": self.id, "MID": message['MID']}
+
+        # append entry has no possibility of get
+        # if message['operation'] is "get":
+        #     self.client_get(message,message['user'])
+        #     return
+
+        for record in range(len(self.pending_request)):
+            entry = self.pending_request[record]
+            if entry['MID'] is message['MID']:
+                entry['success_count'] += 1
+                # A majority of replicas acknowledged the entry
+                if entry['success_count'] > self.total_replica_num / 2 :
+                    self.send(reply)
+                    self.pending_request.pop(record)
+                return
+
+
 
     # increment current term, vote for itself, and broadcast to all replicas
     def candidate_request_vote(self):
@@ -136,6 +161,7 @@ class Replica:
     # candidate’s log is at least as up-to-date as receiver’s log
     def follower_request_vote(self, message):
         message = {"src": self.id, "dst": message['src'], "type": "requestVote", "vote": False,"term": self.currentTerm}
+
         if not self.votedFor or self.currentTerm > message["term"] or len(self.log) > message['lastLogIndex']:
             # reject vote
             self.send(message)
@@ -143,6 +169,7 @@ class Replica:
         else:
             message['vote'] = True
             self.votedFor = True
+            self.currentTerm = message["term"]
             self.reset_timeout()
             self.send(message)
 
@@ -161,15 +188,22 @@ class Replica:
             self.leaderID = message['leader']
             # self.log = msg['entries']
             self.currentTerm = message['term']
+            return
 
         reply =  {"src": self.id, "dst": self.leaderID, "type": "appendEntries",
                    "leader": self.leaderID, "success": False}
+
+        # this leader is invalid, ask it to update term number.
         if leader_term < self.currentTerm:
             reply['term'] = self.currentTerm
             self.send(reply)
             return
 
         self.log = message['entry']
+        self.currentTerm = message['term']
+        reply["success"] = True
+        self.reset_timeout()
+        self.send(reply)
 
     # This is the heart beat used by Leader.
     def empty_append_entries(self):
@@ -181,10 +215,10 @@ class Replica:
         self.election_timeout = random.randrange(150, 300) * 0.01
         self.last_heartbeat = time.time()
 
-    def client_put(self, message):
+    def client_put(self, message, user):
 
         reply = {"src": self.id, "dst": message['src'], "leader": self.leaderID, "type": "fail",
-                 "MID": message['MID'], "entry": {'key': message['key'], 'value': message['value']} }
+                 "MID": message['MID'], "operation": "put", "entry": {'key': message['key'], 'value': message['value']} }
 
         # candidate will not process put or get
         if self.state is "Candidate" or self.leaderID is BROADCAST:
@@ -211,13 +245,18 @@ class Replica:
             reply['dst'] = BROADCAST
             reply['type'] = "appendEntry"
             self.send(reply)
-
+            record = {"MID": message['MID'], 'success_count': 0}
+            if user is not None:
+                record['user'] = user
+            else:
+                record['user'] = message['src']
+            self.pending_request.append(reply)
         self.send(message)
 
     # the user input is used for redirected message from replicas to leader.
     def client_get(self, message, user):
 
-        reply = {"src": self.id, "dst": message['src'],
+        reply = {"src": self.id, "dst": message['src'], "operation": "get",
                  "leader": self.leaderID, "type": "fail",
                  "MID": message['MID'], 'key': message['key']}
 
