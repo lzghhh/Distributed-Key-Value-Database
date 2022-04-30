@@ -81,6 +81,12 @@ class Replica:
                     self.candidate_request_vote()
 
             elif self.state is "Candidate":
+                if msg['type'] is "requestVote" and msg['leader'] is not self.id:
+                    message = {"src": self.id, "dst": message['src'], "type": "requestVote", "leader": self.leaderID,
+                               "vote": False, "term": self.currentTerm}
+                    self.send(message)
+                    continue
+
                 # received votes from others
                 if msg['type'] == "requestVote" and msg['vote']:
                     self.received_votes += 1
@@ -91,6 +97,7 @@ class Replica:
                 if self.received_votes >= self.total_replica_num / 2:
                     self.state = "Leader"
                     self.received_votes = 0
+                    self.leaderID = self.id
                     # broadcast new leader established
                     self.empty_append_entries()
 
@@ -151,6 +158,7 @@ class Replica:
     # increment current term, vote for itself, and broadcast to all replicas
     def candidate_request_vote(self):
         self.currentTerm += 1
+        self.leaderID = BROADCAST
         message = {"src": self.id, "dst": BROADCAST,
                    "candidateID": self.id, "term": self.currentTerm, "lastLogIndex": len(self.log), "lastLogTerm": None,
                    "type": "requestVote", "leader": self.id}
@@ -161,7 +169,7 @@ class Replica:
     # check for term number, latest log number, and reset its timeout
     # candidate’s log is at least as up-to-date as receiver’s log
     def follower_request_vote(self, message):
-        message = {"src": self.id, "dst": message['src'], "type": "requestVote", "vote": False,"term": self.currentTerm}
+        message = {"src": self.id, "dst": message['src'], "type": "requestVote", "leader": self.leaderID, "vote": False,"term": self.currentTerm}
 
         if not self.votedFor or self.currentTerm > message["term"] or len(self.log) > message['lastLogIndex']:
             # reject vote
