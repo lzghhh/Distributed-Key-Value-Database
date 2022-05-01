@@ -68,6 +68,11 @@ class Replica:
             msg = json.loads(data.decode('utf-8'))
             # change between three states
             if self.state == "Follower":
+
+                if time.time() - self.last_RPC > self.election_timeout:
+                    self.state = "Candidate"
+                    self.candidate_request_vote()
+                    
                 #  follower received append entry RPC, could be heart beat or log update.
                 if msg['type'] == "appendEntry":
                     self.follower_append_entry()
@@ -75,9 +80,7 @@ class Replica:
                 if msg['type'] is "requestVote":
                     self.follower_request_vote(msg)
                 # if time out, then become candidate
-                if time.time() - self.last_RPC > self.election_timeout:
-                    self.state = "Candidate"
-                    self.candidate_request_vote()
+
 
             if self.state is "Candidate":
                 if msg['type'] is "requestVote" and msg['leader'] is not self.id:
