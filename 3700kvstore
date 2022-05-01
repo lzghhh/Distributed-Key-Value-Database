@@ -21,17 +21,17 @@ class Replica:
         self.leaderID = BROADCAST;
         # election time out, the paper suggest 150 to 300 ms, the default wait time for test is 2 seconds
         # so there should be a leader when user begin to send request.
-        self.election_timeout = random.randrange(150, 300) * 0.001
+        self.election_timeout = random.randrange(150, 300) * 0.01
         self.last_RPC = time.time()
 
         # heart beat and time out
-        self.heartbeat_timeout = 0.025
+        self.heartbeat_timeout = 0.25
         self.last_heartbeat = time.time()
 
         # latest term server has seen
         self.currentTerm = 0
         # candidateId that received vote in current term
-        self.votedFor = False
+        self.votedFor = None
         # index of highest log entry known to be committed ||| Don't need this because we don't actually commiting data?
         self.commitIndex = 0
         # index of the highest log entry applied to state machine
@@ -79,7 +79,6 @@ class Replica:
                     self.state = "Candidate"
                     self.candidate_request_vote()
 
-
             if self.state is "Candidate":
                 if msg['type'] is "requestVote" and msg['leader'] is not self.id:
                     message = {"src": self.id, "dst": message['src'], "type": "requestVote", "leader": self.leaderID,
@@ -91,11 +90,16 @@ class Replica:
                 if msg['type'] is "requestVote" and msg['vote']:
                     self.received_votes += 1
                     self.last_RPC = time.time()
+
+                # the received message contains term greater than myself.
                 if (msg['type'] is "requestVote" or msg['type'] is "appendEntry") and msg['term'] > self.currentTerm:
                     self.state = "Follower"
+                    self.received_votes = 0
                     self.currentTerm = msg['term']
+                    self.reset_timeout()
+                    continue
 
-                if self.received_votes >= self.total_replica_num / 2:
+                if self.received_votes >= Math.ceil(self.total_replica_num / 2):
                     self.state = "Leader"
                     self.received_votes = 0
                     self.leaderID = self.id
@@ -175,19 +179,19 @@ class Replica:
     # check for term number, latest log number, and reset its timeout
     # candidate’s log is at least as up-to-date as receiver’s log
     def follower_request_vote(self, message):
-        message = {"src": self.id, "dst": message['src'], "type": "requestVote", "leader": self.leaderID, "vote": False,
+        reply = {"src": self.id, "dst": message['src'], "type": "requestVote", "leader": self.leaderID, "vote": False,
                    "term": self.currentTerm}
 
-        if self.votedFor or self.currentTerm > message["term"] or len(self.log) > message['lastLogIndex']:
+        if self.votedFor is not message[src] or self.currentTerm >= message["term"] or len(self.log) > message['lastLogIndex']:
             # reject vote
-            self.send(message)
+            self.send(reply)
             return
         else:
-            message['vote'] = True
-            self.votedFor = True
-            self.currentTerm = message["term"]
+            reply['vote'] = True
+            reply['l']
+            self.votedFor = message[src]
             self.reset_timeout()
-            self.send(message)
+            self.send(reply)
 
     # follower will reply true if the term >= current term,
     # delete conflict entry(same index, different term) and all follows it
@@ -198,14 +202,6 @@ class Replica:
         # prevLogIndex = message['prevLogIndex']
         # prevLogTerm = message['prevLogTerm']
 
-        # heart beat
-        if message['entry'] is None:
-            self.reset_timeout()
-            self.leaderID = message['leader']
-            # self.log = msg['entries']
-            self.currentTerm = message['term']
-            return
-
         reply = {"src": self.id, "dst": self.leaderID, "type": "appendEntries",
                  "leader": self.leaderID, "success": False}
 
@@ -213,6 +209,16 @@ class Replica:
         if leader_term < self.currentTerm:
             reply['term'] = self.currentTerm
             self.send(reply)
+            return
+
+
+        # heart beat
+        if message['entry'] is None:
+            self.reset_timeout()
+            self.leaderID = message['leader']
+            self.votedFor = None
+            # self.log = msg['entries']
+            self.currentTerm = message['term']
             return
 
         self.log = message['entry']
@@ -223,6 +229,7 @@ class Replica:
 
     # This is the heart beat used by Leader.
     def empty_append_entries(self):
+        self.last_heartbeat = time.time()
         message = {"src": self.id, "dst": BROADCAST, "type": "appendEntries", "term": self.currentTerm,
                    "leader": self.leaderID, "leaderCommit": self.commitIndex, "entry": None}
         self.send(message)
