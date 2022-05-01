@@ -99,7 +99,7 @@ class Replica:
                     self.reset_timeout()
                     continue
 
-                if self.received_votes >= Math.ceil(self.total_replica_num / 2):
+                if self.received_votes >= math.ceil(self.total_replica_num / 2):
                     self.state = "Leader"
                     self.received_votes = 0
                     self.leaderID = self.id
