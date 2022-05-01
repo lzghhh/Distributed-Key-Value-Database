@@ -88,9 +88,9 @@ class Replica:
                     continue
 
                 # received votes from others
-                print("Received message '%s'" % (msg,), True)
                 if msg['type'] is "requestVote" and msg['vote']:
                     self.received_votes += 1
+                    self.last_RPC = time.time()
                 if (msg['type'] is "requestVote" or msg['type'] is "appendEntry") and msg['term'] > self.currentTerm:
                     self.state = "Follower"
                     self.currentTerm = msg['term']
@@ -105,6 +105,7 @@ class Replica:
                 # if time out, then become candidate
                 if time.time() - self.last_RPC > self.election_timeout:
                     self.state = "Candidate"
+                    self.received_votes = 0
                     self.candidate_request_vote()
 
 
