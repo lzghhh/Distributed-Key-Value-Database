@@ -21,11 +21,11 @@ class Replica:
         self.leaderID = BROADCAST;
         # election time out, the paper suggest 150 to 300 ms, the default wait time for test is 2 seconds
         # so there should be a leader when user begin to send request.
-        self.election_timeout = random.randrange(150, 300) * 0.01
+        self.election_timeout = random.randrange(150, 300) * 0.001
         self.last_RPC = time.time()
 
         # heart beat and time out
-        self.heartbeat_timeout = 0.25
+        self.heartbeat_timeout = 0.025
         self.last_heartbeat = time.time()
 
         # latest term server has seen
@@ -235,7 +235,7 @@ class Replica:
         self.send(message)
 
     def reset_timeout(self):
-        self.election_timeout = random.randrange(150, 300) * 0.01
+        self.election_timeout = random.randrange(150, 300) * 0.001
         self.last_heartbeat = time.time()
         self.last_RPC = time.time()
 
