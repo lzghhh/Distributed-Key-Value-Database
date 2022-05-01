@@ -80,7 +80,7 @@ class Replica:
                     self.candidate_request_vote()
 
 
-            elif self.state is "Candidate":
+            if self.state is "Candidate":
                 if msg['type'] is "requestVote" and msg['leader'] is not self.id:
                     message = {"src": self.id, "dst": message['src'], "type": "requestVote", "leader": self.leaderID,
                                "vote": False, "term": self.currentTerm}
@@ -108,8 +108,7 @@ class Replica:
                     self.received_votes = 0
                     self.candidate_request_vote()
 
-
-            elif self.state is "Leader":
+            if self.state is "Leader":
                 # send heart beat per time out
                 if time.time() - self.last_heartbeat > self.heartbeat_timeout:
                     self.empty_append_entries()
