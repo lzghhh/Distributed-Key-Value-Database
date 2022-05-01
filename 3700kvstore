@@ -64,22 +64,25 @@ class Replica:
 
     def run(self):
         while True:
+
+            if self.state is "Follower":
+                # if time out, then become candidate
+                if time.time() - self.last_RPC > self.election_timeout:
+                    self.state = "Candidate"
+                    self.candidate_request_vote()
+
             data, addr = self.socket.recvfrom(65535)
             msg = json.loads(data.decode('utf-8'))
             # change between three states
             if self.state == "Follower":
 
-                if time.time() - self.last_RPC > self.election_timeout:
-                    self.state = "Candidate"
-                    self.candidate_request_vote()
-                    
                 #  follower received append entry RPC, could be heart beat or log update.
                 if msg['type'] == "appendEntry":
                     self.follower_append_entry()
                 # follower has updated time out if requestVote is received.
                 if msg['type'] is "requestVote":
                     self.follower_request_vote(msg)
-                # if time out, then become candidate
+
 
 
             if self.state is "Candidate":
