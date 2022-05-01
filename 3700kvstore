@@ -71,6 +71,11 @@ class Replica:
                     self.state = "Candidate"
                     self.candidate_request_vote()
 
+            if self.state is "Leader":
+                # send heart beat per time out
+                if time.time() - self.last_heartbeat > self.heartbeat_timeout:
+                    self.empty_append_entries()
+
             data, addr = self.socket.recvfrom(65535)
             msg = json.loads(data.decode('utf-8'))
             # change between three states
@@ -119,9 +124,6 @@ class Replica:
                     self.candidate_request_vote()
 
             if self.state is "Leader":
-                # send heart beat per time out
-                if time.time() - self.last_heartbeat > self.heartbeat_timeout:
-                    self.empty_append_entries()
 
                 if msg['type'] is "redirect":
                     user = msg['user']
