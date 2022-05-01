@@ -21,11 +21,11 @@ class Replica:
         self.leaderID = BROADCAST;
         # election time out, the paper suggest 150 to 300 ms, the default wait time for test is 2 seconds
         # so there should be a leader when user begin to send request.
-        self.election_timeout = random.randrange(150, 300) * 0.001
+        self.election_timeout = random.randrange(150, 300) * 0.01
         self.last_RPC = time.time()
 
         # heart beat and time out
-        self.heartbeat_timeout = 0.025
+        self.heartbeat_timeout = 0.25
         self.last_heartbeat = time.time()
 
         # latest term server has seen
@@ -92,7 +92,7 @@ class Replica:
                     self.last_RPC = time.time()
 
                 # the received message contains term greater than myself.
-                if (msg['type'] is "requestVote" or msg['type'] is "appendEntry") and msg['term'] > self.currentTerm:
+                if (msg['type'] is "requestVote" or msg['type'] is "appendEntry") and msg['term'] >= self.currentTerm:
                     self.state = "Follower"
                     self.received_votes = 0
                     self.currentTerm = msg['term']
@@ -182,14 +182,14 @@ class Replica:
         reply = {"src": self.id, "dst": message['src'], "type": "requestVote", "leader": self.leaderID, "vote": False,
                    "term": self.currentTerm}
 
-        if self.votedFor is not message[src] or self.currentTerm >= message["term"] or len(self.log) > message['lastLogIndex']:
+        if self.votedFor is not message['src'] or self.currentTerm >= message["term"] or len(self.log) > message['lastLogIndex']:
             # reject vote
             self.send(reply)
             return
         else:
             reply['vote'] = True
             reply['l']
-            self.votedFor = message[src]
+            self.votedFor = message['src']
             self.reset_timeout()
             self.send(reply)
 
