@@ -256,7 +256,6 @@ class Replica:
         # ask others to replicate this log entry by sending append entry RPC
         # retry indefinitely until all other replicas reply ok.
         if self.state is "Leader":
-
             # reply['preLogIndex'] = len(self.log)
             # reply['preLogTerm'] = self.log[len(self.log) - 1]['term']
             reply['entry']['term'] = self.currentTerm
