@@ -64,6 +64,7 @@ class Replica:
 
     def run(self):
         while True:
+            print("-----------------", True)
             data, addr = self.socket.recvfrom(65535)
             msg = json.loads(data.decode('utf-8'))
             # change between three states
