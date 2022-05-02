@@ -2,13 +2,14 @@
 
 import argparse, socket, time, json, select, struct, sys, math, os
 import random
+import signal
 
 BROADCAST = "FFFF"
 
 
 class Replica:
     def __init__(self, port, id, others):
-
+        self.debugtime = time.time()
         self.port = port
         self.id = id
         self.others = others
@@ -19,33 +20,33 @@ class Replica:
         self.log = []
         # the leader ID that current replica believe.
         self.leaderID = BROADCAST;
-        # election time out, the paper suggest 150 to 300 ms, the default wait time for test is 2 seconds
+        # election time out, the paper suggest 150 to 300 ms, the default wait time for test == 2 seconds
         # so there should be a leader when user begin to send request.
         self.election_timeout = random.randrange(150, 300) * 0.001
         self.last_RPC = time.time()
 
         # heart beat and time out
-        self.heartbeat_timeout = 0.025
+        self.heartbeat_timeout = 0.050
         self.last_heartbeat = time.time()
 
         # latest term server has seen
         self.currentTerm = 0
         # candidateId that received vote in current term
         self.votedFor = None
-        # index of highest log entry known to be committed ||| Don't need this because we don't actually commiting data?
+        # index of highest log entry known to be committed ||| Don't need th== because we don't actually commiting data?
         self.commitIndex = 0
         # index of the highest log entry applied to state machine
         self.lastApplied = 0
         # for each server, index of the next log entry to send to that server
-        # This is used for inconsistency recovery of logs, can just send all logs and let replica decide where to copy.
+        # Th== == used for incons==tency recovery of logs, can just send all logs and let replica decide where to copy.
         self.nextIndex = []
         # for each server, index of the highest log entry known to be replicated on server
         self.matchIndex = []
 
         # Above are arguments stated in the paper
 
-        # how many replicas are there, maybe future test will add new replicas, remember to modify if there is.
-        self.total_replica_num = len(others)
+        # how many replicas are there, maybe future test will add new replicas, remember to modify if there ==.
+        self.total_replica_num = len(others) + 1
         # received votes must be more than half of total replica numbers
         self.received_votes = 0
         # received append message for append entry RPC
@@ -56,118 +57,140 @@ class Replica:
 
         print("Replica %s starting up" % self.id, True)
         hello = {"src": self.id, "dst": BROADCAST, "leader": BROADCAST, "type": "hello"}
+        print("-------------------------------", flush=True)
+        print(time.time() - self.debugtime, flush=True)
+        print(time.time(), flush=True)
         self.send(hello)
         print("Sent hello message: %s" % hello, True)
 
     def send(self, message):
         self.socket.sendto(json.dumps(message).encode('utf-8'), ('localhost', self.port))
+        print("Sent message by" , flush=True)
+        print(self.id , flush=True)
+        print(message, flush=True)
 
     def run(self):
         while True:
+            self.socket.setblocking(0)
+            ready = select.select([self.socket], [], [], 0.01)
 
-            if self.state is "Follower":
-                # if time out, then become candidate
-                if time.time() - self.last_RPC > self.election_timeout:
-                    self.state = "Candidate"
-                    self.candidate_request_vote()
+            if ready[0]:
+                print("+++++++++++++++++++++++++++++++++++++++", flush=True)
+                print(time.time() - self.debugtime, flush=True)
+                print(time.time(), flush=True)
 
-            if self.state is "Leader":
-                # send heart beat per time out
-                if time.time() - self.last_heartbeat > self.heartbeat_timeout:
-                    self.empty_append_entries()
+                data = self.socket.recv(65535)
+                msg = json.loads(data.decode('utf-8'))
+                print("Recevied message by" , flush=True)
+                print(self.id , flush=True)
+                print(msg, flush=True)
+                if self.state == "Follower":
+                    if msg['type'] == "appendEntry":
+                        self.follower_append_entry(msg)
+                    if msg['type'] == "requestVote":
+                        self.follower_request_vote(msg)
+                    if time.time() - self.last_RPC > self.election_timeout:
+                        print("``````````````````````````````````````", flush=True)
+                        print(time.time(), flush=True)
+                        print(self.last_RPC, flush=True)
+                        print(self.election_timeout, flush=True)
+                        self.state = "Candidate"
+                        self.candidate_request_vote()
 
-            data, addr = self.socket.recvfrom(65535)
-            msg = json.loads(data.decode('utf-8'))
-            # change between three states
-            if self.state == "Follower":
+                if self.state == "Candidate":
+                    # if msg['type'] == "requestVote" and msg['leader'] != self.id and not msg['vote']:
+                    #     message = {"src": self.id, "dst": msg['src'], "type": "requestVote",
+                    #                "leader": self.leaderID,
+                    #                "vote": False, "term": self.currentTerm}
+                    #     self.send(message)
+                    #     continue
 
-                #  follower received append entry RPC, could be heart beat or log update.
-                if msg['type'] == "appendEntry":
-                    self.follower_append_entry()
-                # follower has updated time out if requestVote is received.
-                if msg['type'] is "requestVote":
-                    self.follower_request_vote(msg)
+                    if msg['type'] == "requestVote" and msg['vote']:
+                        self.received_votes += 1
+                        self.last_RPC = time.time()
 
+                    if (msg['type'] == "requestVote" or msg['type'] == "appendEntry") and msg['term'] > self.currentTerm:
+                        self.state = "Follower"
+                        self.received_votes = 0
+                        self.currentTerm = msg['term']
+                        self.reset_timeout()
+                        continue
 
+                    if self.received_votes >= math.ceil((self.total_replica_num / 2.0)):
+                        print("received_votes", flush=True)
+                        print(self.received_votes, flush=True)
+                        print(self.total_replica_num, flush=True)
+                        self.state = "Leader"
+                        print(self.id, flush=True)
+                        print("new leader is elected", flush=True)
+                        self.received_votes = 0
+                        self.leaderID = self.id
+                        self.empty_append_entries()
 
-            if self.state is "Candidate":
-                if msg['type'] is "requestVote" and msg['leader'] is not self.id:
-                    message = {"src": self.id, "dst": message['src'], "type": "requestVote", "leader": self.leaderID,
-                               "vote": False, "term": self.currentTerm}
-                    self.send(message)
-                    continue
+                    if time.time() - self.last_RPC > self.election_timeout:
+                        self.state = "Candidate"
+                        self.received_votes = 0
+                        self.candidate_request_vote()
 
-                # received votes from others
-                if msg['type'] is "requestVote" and msg['vote']:
-                    self.received_votes += 1
-                    self.last_RPC = time.time()
+                if self.state == "Leader":
+                    if time.time() - self.last_heartbeat > self.heartbeat_timeout:
+                        self.empty_append_entries()
+                    if msg['type'] == "redirect":
+                        user = msg['user']
+                        operation = msg['operation']
+                        if operation == "get":
+                            self.client_get(msg, user)
+                        if operation == "put":
+                            self.client_put(msg, user)
+                    if msg['type'] == "appendEntry":
+                        self.leader_reply_client(msg)
 
-                # the received message contains term greater than myself.
-                if (msg['type'] is "requestVote" or msg['type'] is "appendEntry") and msg['term'] >= self.currentTerm:
-                    self.state = "Follower"
-                    self.received_votes = 0
-                    self.currentTerm = msg['term']
-                    self.reset_timeout()
-                    continue
-
-                if self.received_votes >= math.ceil(self.total_replica_num / 2):
-                    self.state = "Leader"
-                    self.received_votes = 0
-                    self.leaderID = self.id
-                    # broadcast new leader established
-                    self.empty_append_entries()
-
-                # if time out, then become candidate
-                if time.time() - self.last_RPC > self.election_timeout:
-                    self.state = "Candidate"
-                    self.received_votes = 0
-                    self.candidate_request_vote()
-
-            if self.state is "Leader":
-
-                if msg['type'] is "redirect":
-                    user = msg['user']
-                    operation = msg['operation']
-                    if operation is "get":
-                        self.client_get(msg, user)
-                    elif operation is "put":
-                        self.client_put(msg, user)
-                # if leader received append entry RPC with ok message, then increment its count.
-                # when the majority of replicas replied ok, commit and reply the client.
-                # meanwhile, indefinitely retry any replica that times out or failed.
-                # Currently believe all append entry is delievered and successed.
-                # if msg['type'] is "appendEntry" and msg['success'] is True:
-                # how to know which replica has replied yes while keep track of all those replied no?
-                if msg['type'] is "appendEntry":
-                    self.leader_reply_client(message)
-
-            # the get and put are shared functionalities among all states
-            if msg['type'] == "put":
-                self.client_put(msg, None)
-            if msg['type'] == "get":
-                self.client_get(msg, None)
-            print("Received message '%s'" % (msg,), True)
+                if msg['type'] == "put":
+                    self.client_put(msg, None)
+                if msg['type'] == "get":
+                    self.client_get(msg, None)
+                # print("Received message '%s'" % (msg,), True)
+            else:
+                print("==================================", flush=True)
+                print(time.time() - self.debugtime, flush=True)
+                print(time.time(), flush=True)
+                if self.state == "Follower":
+                    if time.time() - self.last_RPC > self.election_timeout:
+                        self.state = "Candidate"
+                        self.candidate_request_vote()
+                if self.state == "Leader":
+                    if time.time() - self.last_heartbeat > self.heartbeat_timeout:
+                        self.empty_append_entries()
 
     def leader_reply_client(self, message):
-        # leader finds out that it is outdated and return back to follower.
+        # leader finds out that it == outdated and return back to follower.
+        print("kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk", flush=True)
         if self.currentTerm < message['term']:
             self.state = "Follower"
             self.currentTerm = message['term']
-
-        reply = {"src": self.id, "dst": message['user'],
-                 "type": "ok", "leader": self.id, "MID": message['MID']}
+        print("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz", flush=True)
+        reply = {"src": self.id,"type": "ok", "leader": self.id}
 
         # append entry has no possibility of get
-        # if message['operation'] is "get":
+        # if message['operation'] == "get":
         #     self.client_get(message,message['user'])
         #     return
 
+
+        print(self.pending_request, flush=True)
         for record in range(len(self.pending_request)):
             entry = self.pending_request[record]
-            if entry['MID'] is message['MID']:
+            print("**************************************", flush=True)
+            print(entry['MID'], flush=True)
+            print(message['MID'], flush=True)
+            print("**************************************", flush=True)
+            if entry['MID'] == message['MID']:
                 entry['success_count'] += 1
                 # A majority of replicas acknowledged the entry
-                if entry['success_count'] > self.total_replica_num / 2:
+                if entry['success_count'] >= math.ceil((self.total_replica_num / 2.0)):
+                    print("llllllllllllllllllllllllllllllllllll", flush=True)
+                    reply['dst'] =  entry['user']
+                    reply['MID'] = entry['MID']
                     self.send(reply)
                     self.pending_request.pop(record)
                 return
@@ -178,25 +201,27 @@ class Replica:
         self.leaderID = BROADCAST
         message = {"src": self.id, "dst": BROADCAST,
                    "candidateID": self.id, "term": self.currentTerm, "lastLogIndex": len(self.log), "lastLogTerm": None,
-                   "type": "requestVote", "leader": self.id}
+                   "type": "requestVote", "leader": self.id,'vote': False}
         self.send(message)
         self.received_votes += 1
         self.reset_timeout()
 
     # follower received request vote RPC from candidate
     # check for term number, latest log number, and reset its timeout
-    # candidate’s log is at least as up-to-date as receiver’s log
+    # candidate’s log == at least as up-to-date as receiver’s log
     def follower_request_vote(self, message):
         reply = {"src": self.id, "dst": message['src'], "type": "requestVote", "leader": self.leaderID, "vote": False,
-                   "term": self.currentTerm}
+                 "term": self.currentTerm}
 
-        if self.votedFor is not message['src'] or self.currentTerm >= message["term"] or len(self.log) > message['lastLogIndex']:
+        if self.votedFor == message['src']:
+            return
+
+        if self.votedFor != None or self.currentTerm > message["term"] or len(self.log) > message['lastLogIndex']:
             # reject vote
             self.send(reply)
             return
         else:
             reply['vote'] = True
-            reply['l']
             self.votedFor = message['src']
             self.reset_timeout()
             self.send(reply)
@@ -210,18 +235,16 @@ class Replica:
         # prevLogIndex = message['prevLogIndex']
         # prevLogTerm = message['prevLogTerm']
 
-        reply = {"src": self.id, "dst": self.leaderID, "type": "appendEntries",
-                 "leader": self.leaderID, "success": False}
+        reply = {"src": self.id, "dst": self.leaderID, "type": "appendEntry",
+                 "leader": self.leaderID,"success": False,'term':self.currentTerm}
 
-        # this leader is invalid, ask it to update term number.
+        # th== leader == invalid, ask it to update term number.
         if leader_term < self.currentTerm:
-            reply['term'] = self.currentTerm
             self.send(reply)
             return
 
-
         # heart beat
-        if message['entry'] is None:
+        if message['key'] == None or message['value'] == None:
             self.reset_timeout()
             self.leaderID = message['leader']
             self.votedFor = None
@@ -229,17 +252,19 @@ class Replica:
             self.currentTerm = message['term']
             return
 
-        self.log = message['entry']
+        entry = {'key': message['key'], 'value': message['value'], 'term': self.currentTerm}
+        self.log.append(entry)
         self.currentTerm = message['term']
         reply["success"] = True
+        reply['MID'] = message['MID']
         self.reset_timeout()
         self.send(reply)
 
-    # This is the heart beat used by Leader.
+    # Th== == the heart beat used by Leader.
     def empty_append_entries(self):
         self.last_heartbeat = time.time()
-        message = {"src": self.id, "dst": BROADCAST, "type": "appendEntries", "term": self.currentTerm,
-                   "leader": self.leaderID, "leaderCommit": self.commitIndex, "entry": None}
+        message = {"src": self.id, "dst": BROADCAST, "type": "appendEntry", "term": self.currentTerm,
+                   "leader": self.leaderID, "leaderCommit": self.commitIndex, "key": None,"value":None}
         self.send(message)
 
     def reset_timeout(self):
@@ -248,84 +273,97 @@ class Replica:
         self.last_RPC = time.time()
 
     def client_put(self, message, user):
-
-        reply = {"src": self.id, "dst": message['src'], "leader": self.leaderID, "type": "fail",
-                 "MID": message['MID'], "operation": "put", "entry": {'key': message['key'], 'value': message['value']}}
-
+        reply = {"src": self.id, "dst": message['src'], "leader": self.leaderID, "type": "fail",'term':self.currentTerm,
+                 "MID": message['MID'], "operation": "put",'key': message['key'], 'value': message['value']}
+        
         # candidate will not process put or get
-        if self.state is "Candidate" or self.leaderID is BROADCAST:
-            self.send(message)
+        if self.state == "Candidate" or self.leaderID == BROADCAST:
+            self.send(reply)
             return
         # follower will redirect put or get
-        if self.state is "Follower":
+        if self.state == "Follower":
             reply['type'] = "redirect"
             reply['dst'] = self.leaderID
             reply['user'] = message['src']
             reply['operation'] = message['type']
-            self.send(message)
+            self.send(reply)
             return
 
         # leader will first append new log with current term into its own log entries
-        # ask others to replicate this log entry by sending append entry RPC
+        # ask others to replicate th== log entry by sending append entry RPC
         # retry indefinitely until all other replicas reply ok.
-        if self.state is "Leader":
+        if self.state == "Leader":
             # reply['preLogIndex'] = len(self.log)
             # reply['preLogTerm'] = self.log[len(self.log) - 1]['term']
-            reply['entry']['term'] = self.currentTerm
-            self.log.append(reply['entry'])
-            reply['entry'] = self.log
+            entry = {'key': message['key'], 'value': message['value'], 'term': self.currentTerm}
+            flag = True
+            # for record in self.log:
+            #     if record['key'] == entry['key']:
+            #         flag = False
+            #         record = entry
+            for x in range(len(self.log)):
+                if self.log[x]['key']== entry['key']:
+                    flag = False
+                    self.log[x] = entry
+                    break
+            if flag:
+                self.log.append(entry)
             reply['dst'] = BROADCAST
             reply['type'] = "appendEntry"
             self.send(reply)
+            self.last_heartbeat = time.time()
             record = {"MID": message['MID'], 'success_count': 0}
-            if user is not None:
+            if user != None:
                 record['user'] = user
             else:
                 record['user'] = message['src']
-            self.pending_request.append(reply)
-        self.send(message)
+            self.pending_request.append(record)
+        
 
-    # the user input is used for redirected message from replicas to leader.
+    # the user input == used for redirected message from replicas to leader.
     def client_get(self, message, user):
 
-        reply = {"src": self.id, "dst": message['src'], "operation": "get",
+        reply = {"src": self.id, "dst": message['src'], 
                  "leader": self.leaderID, "type": "fail",
-                 "MID": message['MID'], 'key': message['key']}
+                 "MID": message['MID']}
 
         # candidate will not process put or get
-        if self.state is "Candidate" or self.leaderID is BROADCAST:
-            self.send(message)
+        if self.state == "Candidate" or self.leaderID == BROADCAST:
+            self.send(reply)
             return
 
         # follower will redirect put or get
-        if self.state is "Follower":
+        if self.state == "Follower":
+            reply['key'] = message['key']
             reply['type'] = "redirect"
             reply['dst'] = self.leaderID
             reply['user'] = message['src']
             reply['operation'] = message['type']
-            self.send(message)
+            reply['term'] = message['term']
+            self.send(reply)
             return
 
-        if self.state is "Leader":
+        if self.state == "Leader":
+            print("//////////////////////////////////////////////////////////////////////////")
+            print(self.log, flush=True)
             for entry in self.log:
-                if entry['key'] is message['key']:
+                if entry['key'] == message['key']:
                     value = entry['value']
                     reply['type'] = "ok"
                     reply['value'] = value
-                    if user is not None:
+                    if user != None:
                         reply['dst'] = user
                     else:
                         reply['dst'] = message['src']
 
-                    self.send(message)
+                    self.send(reply)
                     return
-        self.send(reply)
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description='run a key-value store')
     parser.add_argument('port', type=int, help="Port number to communicate")
-    parser.add_argument('id', type=str, help="ID of this replica")
+    parser.add_argument('id', type=str, help="ID of th== replica")
     parser.add_argument('others', metavar='others', type=str, nargs='+', help="IDs of other replicas")
     args = parser.parse_args()
     replica = Replica(args.port, args.id, args.others)
