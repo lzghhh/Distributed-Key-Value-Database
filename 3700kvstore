@@ -65,8 +65,8 @@ class Replica:
 
     def send(self, message):
         self.socket.sendto(json.dumps(message).encode('utf-8'), ('localhost', self.port))
-        print("Sent message by" , flush=True)
-        print(self.id , flush=True)
+        print("Sent message by", flush=True)
+        print(self.id, flush=True)
         print(message, flush=True)
 
     def run(self):
@@ -81,8 +81,8 @@ class Replica:
 
                 data = self.socket.recv(65535)
                 msg = json.loads(data.decode('utf-8'))
-                print("Recevied message by" , flush=True)
-                print(self.id , flush=True)
+                print("Recevied message by", flush=True)
+                print(self.id, flush=True)
                 print(msg, flush=True)
                 if self.state == "Follower":
                     if msg['type'] == "appendEntry":
@@ -109,7 +109,8 @@ class Replica:
                         self.received_votes += 1
                         self.last_RPC = time.time()
 
-                    if (msg['type'] == "requestVote" or msg['type'] == "appendEntry") and msg['term'] > self.currentTerm:
+                    if (msg['type'] == "requestVote" or msg['type'] == "appendEntry") and msg[
+                        'term'] > self.currentTerm:
                         self.state = "Follower"
                         self.received_votes = 0
                         self.currentTerm = msg['term']
@@ -169,13 +170,12 @@ class Replica:
             self.state = "Follower"
             self.currentTerm = message['term']
         print("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz", flush=True)
-        reply = {"src": self.id,"type": "ok", "leader": self.id}
+        reply = {"src": self.id, "type": "ok", "leader": self.id}
 
         # append entry has no possibility of get
         # if message['operation'] == "get":
         #     self.client_get(message,message['user'])
         #     return
-
 
         print(self.pending_request, flush=True)
         for record in range(len(self.pending_request)):
@@ -189,7 +189,7 @@ class Replica:
                 # A majority of replicas acknowledged the entry
                 if entry['success_count'] >= math.ceil((self.total_replica_num / 2.0)):
                     print("llllllllllllllllllllllllllllllllllll", flush=True)
-                    reply['dst'] =  entry['user']
+                    reply['dst'] = entry['user']
                     reply['MID'] = entry['MID']
                     self.send(reply)
                     self.pending_request.pop(record)
@@ -201,7 +201,7 @@ class Replica:
         self.leaderID = BROADCAST
         message = {"src": self.id, "dst": BROADCAST,
                    "candidateID": self.id, "term": self.currentTerm, "lastLogIndex": len(self.log), "lastLogTerm": None,
-                   "type": "requestVote", "leader": self.id,'vote': False}
+                   "type": "requestVote", "leader": self.id, 'vote': False}
         self.send(message)
         self.received_votes += 1
         self.reset_timeout()
@@ -236,7 +236,7 @@ class Replica:
         # prevLogTerm = message['prevLogTerm']
 
         reply = {"src": self.id, "dst": self.leaderID, "type": "appendEntry",
-                 "leader": self.leaderID,"success": False,'term':self.currentTerm}
+                 "leader": self.leaderID, "success": False, 'term': self.currentTerm}
 
         # th== leader == invalid, ask it to update term number.
         if leader_term < self.currentTerm:
@@ -264,7 +264,7 @@ class Replica:
     def empty_append_entries(self):
         self.last_heartbeat = time.time()
         message = {"src": self.id, "dst": BROADCAST, "type": "appendEntry", "term": self.currentTerm,
-                   "leader": self.leaderID, "leaderCommit": self.commitIndex, "key": None,"value":None}
+                   "leader": self.leaderID, "leaderCommit": self.commitIndex, "key": None, "value": None}
         self.send(message)
 
     def reset_timeout(self):
@@ -273,9 +273,10 @@ class Replica:
         self.last_RPC = time.time()
 
     def client_put(self, message, user):
-        reply = {"src": self.id, "dst": message['src'], "leader": self.leaderID, "type": "fail",'term':self.currentTerm,
-                 "MID": message['MID'], "operation": "put",'key': message['key'], 'value': message['value']}
-        
+        reply = {"src": self.id, "dst": message['src'], "leader": self.leaderID, "type": "fail",
+                 'term': self.currentTerm,
+                 "MID": message['MID'], "operation": "put", 'key': message['key'], 'value': message['value']}
+
         # candidate will not process put or get
         if self.state == "Candidate" or self.leaderID == BROADCAST:
             self.send(reply)
@@ -302,7 +303,7 @@ class Replica:
             #         flag = False
             #         record = entry
             for x in range(len(self.log)):
-                if self.log[x]['key']== entry['key']:
+                if self.log[x]['key'] == entry['key']:
                     flag = False
                     self.log[x] = entry
                     break
@@ -318,12 +319,11 @@ class Replica:
             else:
                 record['user'] = message['src']
             self.pending_request.append(record)
-        
 
     # the user input == used for redirected message from replicas to leader.
     def client_get(self, message, user):
 
-        reply = {"src": self.id, "dst": message['src'], 
+        reply = {"src": self.id, "dst": message['src'],
                  "leader": self.leaderID, "type": "fail",
                  "MID": message['MID']}
 
