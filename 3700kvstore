@@ -179,7 +179,7 @@ class Replica:
         # leader finds out that it == outdated and return back to follower.
         # print("kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk", flush=True)
         if "lastLogIndex" in message:
-            if len(self.log) < message['lastLogIndex']:
+            if len(self.log) + len(self.pending_request) < message['lastLogIndex']:
                 self.state = "Follower"
                 self.currentTerm = message['term']
                 return
@@ -199,21 +199,30 @@ class Replica:
         if 'MID' not in message:
             return
         # print(self.pending_request, flush=True)
-        for record in range(len(self.pending_request)):
-            entry = self.pending_request[record]
+        for x in range(len(self.pending_request)):
+            record = self.pending_request[x]
             # print("**************************************", flush=True)
             # print(entry, flush=True)
             # print(message, flush=True)
             # print("**************************************", flush=True)
-            if entry['MID'] == message['MID']:
-                entry['success_count'] += 1
-                entry['replied'].append(message['src'])
+            if record['MID'] == message['MID']:
+                record['success_count'] += 1
+                record['replied'].append(message['src'])
                 # A majority of replicas acknowledged the entry
-                if not entry['okAnswer'] and entry['success_count'] >= math.ceil((self.total_replica_num / 2.0)):
+                if not record['okAnswer'] and record['success_count'] >= math.ceil((self.total_replica_num / 2.0)):
+
+                    flag = True
+                    for y in range(len(self.log)):
+                        if self.log[y]['key'] == record['entry']['key']:
+                            flag = False
+                            self.log[y] = record['entry']
+                            break
+                    if flag:
+                        self.log.append(record['entry'])
                     # print("llllllllllllllllllllllllllllllllllll", flush=True)
-                    reply['dst'] = entry['user']
-                    reply['MID'] = entry['MID']
-                    entry['okAnswer'] = True
+                    reply['dst'] = record['user']
+                    reply['MID'] = record['MID']
+                    record['okAnswer'] = True
                     self.send(reply)
                 return
 
@@ -393,24 +402,6 @@ class Replica:
             # reply['preLogIndex'] = len(self.log)
             # reply['preLogTerm'] = self.log[len(self.log) - 1]['term']
             entry = {'key': message['key'], 'value': message['value'], 'term': self.currentTerm}
-            flag = True
-            temp = {"src": self.id, "dst": message['src'], "leader": self.leaderID,
-                    "type": "ok", "MID": message['MID']}
-            # for record in self.pending_request:
-            #     if record['entry']['key'] == message['key']:
-            #         temp['type'] = "fail"
-            #         self.send(temp)
-            #         return
-            for x in range(len(self.log)):
-                if self.log[x]['key'] == entry['key'] and self.log[x]['value'] == entry['value']:
-                    self.send(temp)
-                    return
-                if self.log[x]['key'] == entry['key']:
-                    flag = False
-                    self.log[x] = entry
-                    break
-            if flag:
-                self.log.append(entry)
             reply['dst'] = BROADCAST
             reply['type'] = "appendEntry"
             reply['lastLogIndex'] =  len(self.log)
