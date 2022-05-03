@@ -19,12 +19,17 @@ class Replica:
         # the log entry used to store key value pair
         self.log = []
         # the leader ID that current replica believe.
-        self.leaderID = BROADCAST;
+        self.leaderID = BROADCAST
         # election time out, the paper suggest 150 to 300 ms, the default wait time for test == 2 seconds
         # so there should be a leader when user begin to send request.
         self.election_timeout = random.randrange(50, 200) * 0.01
         self.last_RPC = time.time()
-
+        # for handling the partition.
+        self.election_count = len(others) + 1
+        self.received_vote_count = 0
+        self.count_voted_replica = 0
+        self.last_count_time = time.time()
+        self.count_timeout = 0.4
         # heart beat and time out
         self.heartbeat_timeout = 0.25
         self.last_heartbeat = time.time()
@@ -97,24 +102,33 @@ class Replica:
                         # print(time.time(), flush=True)
                         # print(self.last_RPC, flush=True)
                         # print(self.election_timeout, flush=True)
+                        self.received_vote_count = 0;
+                        self.count_voted_replica = 0;
+                        self.last_count_time = time.time();
                         self.state = "Candidate"
                         self.candidate_request_vote()
 
                 if self.state == "Candidate":
 
-                    if msg['type'] == "requestVote" and msg['vote']:
-                        self.received_votes += 1
-                        self.last_RPC = time.time()
-
-                    if (msg['type'] == "requestVote" or msg['type'] == "appendEntry") and msg[
-                        'term'] > self.currentTerm:
+                    if (msg['type'] == "requestVote" or msg['type'] == "appendEntry") and (msg[
+                        'term'] > self.currentTerm or msg["lastLogIndex"] > len(self.log)):
                         self.state = "Follower"
                         self.received_votes = 0
                         self.currentTerm = msg['term']
                         self.reset_timeout()
                         continue
 
-                    if self.received_votes >= math.ceil((self.total_replica_num / 2.0)):
+                    if msg['type'] == "requestVote":
+                        self.count_voted_replica += 1
+                    # update the number of total replica number
+                    if time.time() - self.last_count_time > self.count_timeout:
+                        self.election_count = self.count_voted_replica
+
+                    if msg['type'] == "requestVote" and msg['vote']:
+                        self.received_votes += 1
+                        self.last_RPC = time.time()
+
+                    if self.received_votes >= math.ceil((self.election_count / 2.0)):
                         # print("received_votes", flush=True)
                         # print(self.received_votes, flush=True)
                         # print(self.total_replica_num, flush=True)
@@ -164,9 +178,16 @@ class Replica:
     def leader_reply_client(self, message):
         # leader finds out that it == outdated and return back to follower.
         # print("kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk", flush=True)
+        if "lastLogIndex" in message:
+            if len(self.log) < message['lastLogIndex']:
+                self.state = "Follower"
+                self.currentTerm = message['term']
+                return
+
         if self.currentTerm < message['term']:
             self.state = "Follower"
             self.currentTerm = message['term']
+            return
         # print("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz", flush=True)
         reply = {"src": self.id, "type": "ok", "leader": self.id}
 
@@ -212,7 +233,7 @@ class Replica:
     # candidate’s log == at least as up-to-date as receiver’s log
     def follower_request_vote(self, message):
         reply = {"src": self.id, "dst": message['src'], "type": "requestVote", "leader": self.leaderID, "vote": False,
-                 "term": self.currentTerm}
+                 "term": self.currentTerm,"lastLogIndex": len(self.log)}
         if self.votedFor == message['src']:
             return
         if self.votedFor != None or self.currentTerm > message["term"] or len(self.log) > message['lastLogIndex']:
@@ -235,7 +256,7 @@ class Replica:
         # prevLogIndex = message['prevLogIndex']
         # prevLogTerm = message['prevLogTerm']
 
-        reply = {"src": self.id, "dst": self.leaderID, "type": "appendEntry",
+        reply = {"src": self.id, "dst": self.leaderID, "type": "appendEntry","lastLogIndex": len(self.log),
                  "leader": self.leaderID, "success": False, 'term': self.currentTerm}
 
         # The partition will cause reply directed to none leader
@@ -323,7 +344,6 @@ class Replica:
                             continue
 
     def follower_reply_fail(self):
-        print(self.follower_pending_request,flush=True)
         if self.leaderID != BROADCAST:
             for replicate in self.follower_pending_request:
                 replicate['dst'] = self.leaderID
@@ -333,7 +353,7 @@ class Replica:
     # Th== == the heart beat used by Leader.
     def empty_append_entries(self):
         message = {"src": self.id, "dst": BROADCAST, "type": "appendEntry", "term": self.currentTerm,
-                   "leader": self.leaderID, "leaderCommit": self.commitIndex, "key": None, "value": None}
+                   "leader": self.leaderID, "leaderCommit": self.commitIndex, "key": None, "value": None,"lastLogIndex": len(self.log)}
         self.last_heartbeat = time.time()
         message['replies'] = self.total_replica_num
         self.send(message)
@@ -346,7 +366,7 @@ class Replica:
     def client_put(self, message, user):
         reply = {"src": self.id, "dst": message['src'], "leader": self.leaderID, "type": "fail",
                  'term': self.currentTerm,
-                 "MID": message['MID']}
+                 "MID": message['MID'],"lastLogIndex": len(self.log)}
 
         # candidate will not process put or get
         if self.state == "Candidate" or self.leaderID == BROADCAST:
@@ -393,6 +413,7 @@ class Replica:
                 self.log.append(entry)
             reply['dst'] = BROADCAST
             reply['type'] = "appendEntry"
+            reply['lastLogIndex'] =  len(self.log)
             # how many replica is still alive.
             reply['replies'] = self.total_replica_num
             self.send(reply)
@@ -411,7 +432,7 @@ class Replica:
 
         reply = {"src": self.id, "dst": message['src'],
                  "leader": self.leaderID, "type": "fail",
-                 "MID": message['MID']}
+                 "MID": message['MID'],"lastLogIndex": len(self.log)}
 
         # candidate will not process put or get
         if self.state == "Candidate" or self.leaderID == BROADCAST:
