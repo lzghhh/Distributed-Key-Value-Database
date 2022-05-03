@@ -22,11 +22,11 @@ class Replica:
         self.leaderID = BROADCAST;
         # election time out, the paper suggest 150 to 300 ms, the default wait time for test == 2 seconds
         # so there should be a leader when user begin to send request.
-        self.election_timeout = random.randrange(150, 300) * 0.001
+        self.election_timeout = random.randrange(50, 200) * 0.01
         self.last_RPC = time.time()
 
         # heart beat and time out
-        self.heartbeat_timeout = 0.050
+        self.heartbeat_timeout = 0.25
         self.last_heartbeat = time.time()
 
         # latest term server has seen
@@ -51,13 +51,15 @@ class Replica:
         self.received_votes = 0
         # received append message for append entry RPC
         self.pending_request = []
+        # this must be high enough for waiting the response and avoid uneccessary decrease
+        self.pending_timeout = 0.2
+        self.last_pending = time.time()
 
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         self.socket.bind(('localhost', 0))
 
         print("Replica %s starting up" % self.id, True)
         hello = {"src": self.id, "dst": BROADCAST, "leader": BROADCAST, "type": "hello"}
-        print("-------------------------------", flush=True)
         print(time.time() - self.debugtime, flush=True)
         print(time.time(), flush=True)
         self.send(hello)
@@ -65,9 +67,9 @@ class Replica:
 
     def send(self, message):
         self.socket.sendto(json.dumps(message).encode('utf-8'), ('localhost', self.port))
-        print("Sent message by", flush=True)
-        print(self.id, flush=True)
-        print(message, flush=True)
+        # print("Sent message by", flush=True)
+        # print(self.id, flush=True)
+        # print(message, flush=True)
 
     def run(self):
         while True:
@@ -75,35 +77,28 @@ class Replica:
             ready = select.select([self.socket], [], [], 0.01)
 
             if ready[0]:
-                print("+++++++++++++++++++++++++++++++++++++++", flush=True)
-                print(time.time() - self.debugtime, flush=True)
-                print(time.time(), flush=True)
+                # print(time.time() - self.debugtime, flush=True)
+                # print(time.time(), flush=True)
 
                 data = self.socket.recv(65535)
                 msg = json.loads(data.decode('utf-8'))
-                print("Recevied message by", flush=True)
-                print(self.id, flush=True)
-                print(msg, flush=True)
+                # print("Recevied message by", flush=True)
+                # print(self.id, flush=True)
+                # print(msg, flush=True)
                 if self.state == "Follower":
                     if msg['type'] == "appendEntry":
                         self.follower_append_entry(msg)
                     if msg['type'] == "requestVote":
                         self.follower_request_vote(msg)
                     if time.time() - self.last_RPC > self.election_timeout:
-                        print("``````````````````````````````````````", flush=True)
-                        print(time.time(), flush=True)
-                        print(self.last_RPC, flush=True)
-                        print(self.election_timeout, flush=True)
+                        # print("``````````````````````````````````````", flush=True)
+                        # print(time.time(), flush=True)
+                        # print(self.last_RPC, flush=True)
+                        # print(self.election_timeout, flush=True)
                         self.state = "Candidate"
                         self.candidate_request_vote()
 
                 if self.state == "Candidate":
-                    # if msg['type'] == "requestVote" and msg['leader'] != self.id and not msg['vote']:
-                    #     message = {"src": self.id, "dst": msg['src'], "type": "requestVote",
-                    #                "leader": self.leaderID,
-                    #                "vote": False, "term": self.currentTerm}
-                    #     self.send(message)
-                    #     continue
 
                     if msg['type'] == "requestVote" and msg['vote']:
                         self.received_votes += 1
@@ -118,12 +113,12 @@ class Replica:
                         continue
 
                     if self.received_votes >= math.ceil((self.total_replica_num / 2.0)):
-                        print("received_votes", flush=True)
-                        print(self.received_votes, flush=True)
-                        print(self.total_replica_num, flush=True)
+                        # print("received_votes", flush=True)
+                        # print(self.received_votes, flush=True)
+                        # print(self.total_replica_num, flush=True)
                         self.state = "Leader"
-                        print(self.id, flush=True)
-                        print("new leader is elected", flush=True)
+                        # print(self.id, flush=True)
+                        # print("new leader is elected", flush=True)
                         self.received_votes = 0
                         self.leaderID = self.id
                         self.empty_append_entries()
@@ -132,8 +127,9 @@ class Replica:
                         self.state = "Candidate"
                         self.received_votes = 0
                         self.candidate_request_vote()
-
+                # This replica is the Leader
                 if self.state == "Leader":
+                    self.pending_append_entry()
                     if time.time() - self.last_heartbeat > self.heartbeat_timeout:
                         self.empty_append_entries()
                     if msg['type'] == "redirect":
@@ -152,9 +148,9 @@ class Replica:
                     self.client_get(msg, None)
                 # print("Received message '%s'" % (msg,), True)
             else:
-                print("==================================", flush=True)
-                print(time.time() - self.debugtime, flush=True)
-                print(time.time(), flush=True)
+                # print("==================================", flush=True)
+                # print(time.time() - self.debugtime, flush=True)
+                # print(time.time(), flush=True)
                 if self.state == "Follower":
                     if time.time() - self.last_RPC > self.election_timeout:
                         self.state = "Candidate"
@@ -165,11 +161,11 @@ class Replica:
 
     def leader_reply_client(self, message):
         # leader finds out that it == outdated and return back to follower.
-        print("kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk", flush=True)
+        # print("kkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkkk", flush=True)
         if self.currentTerm < message['term']:
             self.state = "Follower"
             self.currentTerm = message['term']
-        print("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz", flush=True)
+        # print("zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz", flush=True)
         reply = {"src": self.id, "type": "ok", "leader": self.id}
 
         # append entry has no possibility of get
@@ -177,22 +173,25 @@ class Replica:
         #     self.client_get(message,message['user'])
         #     return
 
-        print(self.pending_request, flush=True)
+        if 'MID' not in message:
+            return
+        # print(self.pending_request, flush=True)
         for record in range(len(self.pending_request)):
             entry = self.pending_request[record]
-            print("**************************************", flush=True)
-            print(entry['MID'], flush=True)
-            print(message['MID'], flush=True)
-            print("**************************************", flush=True)
+            # print("**************************************", flush=True)
+            # print(entry, flush=True)
+            # print(message, flush=True)
+            # print("**************************************", flush=True)
             if entry['MID'] == message['MID']:
                 entry['success_count'] += 1
+                entry['replied'].append(message['src'])
                 # A majority of replicas acknowledged the entry
-                if entry['success_count'] >= math.ceil((self.total_replica_num / 2.0)):
-                    print("llllllllllllllllllllllllllllllllllll", flush=True)
+                if not entry['okAnswer'] and entry['success_count'] >= math.ceil((self.total_replica_num / 2.0)):
+                    # print("llllllllllllllllllllllllllllllllllll", flush=True)
                     reply['dst'] = entry['user']
                     reply['MID'] = entry['MID']
+                    entry['okAnswer'] = True
                     self.send(reply)
-                    self.pending_request.pop(record)
                 return
 
     # increment current term, vote for itself, and broadcast to all replicas
@@ -215,7 +214,6 @@ class Replica:
 
         if self.votedFor == message['src']:
             return
-
         if self.votedFor != None or self.currentTerm > message["term"] or len(self.log) > message['lastLogIndex']:
             # reject vote
             self.send(reply)
@@ -223,6 +221,7 @@ class Replica:
         else:
             reply['vote'] = True
             self.votedFor = message['src']
+            self.leaderID = BROADCAST
             self.reset_timeout()
             self.send(reply)
 
@@ -238,6 +237,9 @@ class Replica:
         reply = {"src": self.id, "dst": self.leaderID, "type": "appendEntry",
                  "leader": self.leaderID, "success": False, 'term': self.currentTerm}
 
+        # The partition will cause reply directed to none leader
+        if 'key' not in message:
+            return
         # th== leader == invalid, ask it to update term number.
         if leader_term < self.currentTerm:
             self.send(reply)
@@ -250,25 +252,80 @@ class Replica:
             self.votedFor = None
             # self.log = msg['entries']
             self.currentTerm = message['term']
+            self.total_replica_num = message['replies']
             return
 
         entry = {'key': message['key'], 'value': message['value'], 'term': self.currentTerm}
-        self.log.append(entry)
+        flag = True
+        for x in range(len(self.log)):
+            if self.log[x]['key'] == entry['key']:
+                flag = False
+                self.log[x] = entry
+                break
+        if flag:
+            self.log.append(entry)
         self.currentTerm = message['term']
+        # in case some replica is killed
+        self.total_replica_num = message['replies']
         reply["success"] = True
         reply['MID'] = message['MID']
         self.reset_timeout()
         self.send(reply)
 
-    # Th== == the heart beat used by Leader.
-    def empty_append_entries(self):
-        self.last_heartbeat = time.time()
+    def pending_append_entry(self):
         message = {"src": self.id, "dst": BROADCAST, "type": "appendEntry", "term": self.currentTerm,
                    "leader": self.leaderID, "leaderCommit": self.commitIndex, "key": None, "value": None}
+
+        # print(self.pending_request, flush=True)
+        # check for unresponded append entry.
+        # if the replies are all collected, then successfully stored
+        # if unexpected replicas are brought up, record its existence
+        # if not enough replicas responded in a given time, record it as failed.
+        for i in range(len(self.pending_request) - 1, -1, -1):
+            record = self.pending_request[i]
+            if time.time() - record['time'] > self.pending_timeout:
+                record['time'] = time.time()
+                if len(record['replied']) == self.total_replica_num - 1:
+                    self.pending_request.pop(i)
+                elif len(record['replied']) > self.total_replica_num - 1:
+                    self.total_replica_num = len(record['replied'])
+                    self.others = record['replied']
+                    self.pending_request.pop(i)
+                elif len(record['replied']) < self.total_replica_num - 1:
+                    if record['retry_time'] >= 3:
+                        if not record['okAnswer']:
+                            reply = {"src": self.id, 'dst': record['user'],
+                                     "type": "ok", "leader": self.id, 'MID': record['MID']}
+                            self.send(reply)
+                        # print("==================================", flush=True)
+                        # print(self.total_replica_num, flush=True)
+                        self.pending_request.pop(i)
+                        self.total_replica_num -= 1
+                        self.others = record['replied']
+                        continue
+                    for other in self.others:
+                        if other not in record['replied']:
+                            # print(message, flush=True)
+                            # print("**************************************", flush=True)
+                            record['retry_time'] += 1
+                            message['dst'] = other
+                            message['MID'] = record['MID']
+                            message['key'] = record['entry']['key']
+                            message['value'] = record['entry']['value']
+                            message['replies'] = self.total_replica_num
+                            self.send(message)
+                            continue
+
+    # Th== == the heart beat used by Leader.
+    def empty_append_entries(self):
+        message = {"src": self.id, "dst": BROADCAST, "type": "appendEntry", "term": self.currentTerm,
+                   "leader": self.leaderID, "leaderCommit": self.commitIndex, "key": None, "value": None}
+        self.last_heartbeat = time.time()
+        message['replies'] = self.total_replica_num
         self.send(message)
 
     def reset_timeout(self):
-        self.election_timeout = random.randrange(150, 300) * 0.001
+        self.election_timeout = random.randrange(150, 300) * 0.01
         self.last_heartbeat = time.time()
         self.last_RPC = time.time()
 
@@ -298,11 +355,17 @@ class Replica:
             # reply['preLogTerm'] = self.log[len(self.log) - 1]['term']
             entry = {'key': message['key'], 'value': message['value'], 'term': self.currentTerm}
             flag = True
-            # for record in self.log:
-            #     if record['key'] == entry['key']:
-            #         flag = False
-            #         record = entry
+            temp = {"src": self.id, "dst": message['src'], "leader": self.leaderID,
+                    "type": "ok", "MID": message['MID']}
+            # for record in self.pending_request:
+            #     if record['entry']['key'] == message['key']:
+            #         temp['type'] = "fail"
+            #         self.send(temp)
+            #         return
             for x in range(len(self.log)):
+                if self.log[x]['key'] == entry['key'] and self.log[x]['value'] == entry['value']:
+                    self.send(temp)
+                    return
                 if self.log[x]['key'] == entry['key']:
                     flag = False
                     self.log[x] = entry
@@ -311,13 +374,17 @@ class Replica:
                 self.log.append(entry)
             reply['dst'] = BROADCAST
             reply['type'] = "appendEntry"
+            # how many replica is still alive.
+            reply['replies'] = self.total_replica_num
             self.send(reply)
             self.last_heartbeat = time.time()
-            record = {"MID": message['MID'], 'success_count': 0}
+            record = {"MID": message['MID'], 'success_count': 0, "replied": [],
+                      "entry": entry, "retry_time": 0, "okAnswer": False}
             if user != None:
                 record['user'] = user
             else:
                 record['user'] = message['src']
+            record['time'] = time.time()
             self.pending_request.append(record)
 
     # the user input == used for redirected message from replicas to leader.
@@ -339,13 +406,13 @@ class Replica:
             reply['dst'] = self.leaderID
             reply['user'] = message['src']
             reply['operation'] = message['type']
-            reply['term'] = message['term']
+            reply['term'] = self.currentTerm
             self.send(reply)
             return
 
         if self.state == "Leader":
-            print("//////////////////////////////////////////////////////////////////////////")
-            print(self.log, flush=True)
+            # print("//////////////////////////////////////////////////////////////////////////")
+            # print(self.log, flush=True)
             for entry in self.log:
                 if entry['key'] == message['key']:
                     value = entry['value']
