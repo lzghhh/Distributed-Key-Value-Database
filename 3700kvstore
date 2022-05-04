@@ -111,11 +111,11 @@ class Replica:
                 if self.state == "Candidate":
 
                     if (msg['type'] == "requestVote" or msg['type'] == "appendEntry") and (msg[
-                        'term'] > self.currentTerm or msg["lastLogIndex"] > len(self.log)):
+                        'term'] >= self.currentTerm or msg["lastLogIndex"] > len(self.log)):
                         self.state = "Follower"
                         self.received_votes = 0
                         self.currentTerm = msg['term']
-                        self.reset_timeout()
+                        self.stop_election_timeout()
                         continue
 
                     if msg['type'] == "requestVote":
@@ -241,7 +241,7 @@ class Replica:
         self.leaderID = BROADCAST
         message = {"src": self.id, "dst": BROADCAST,
                    "candidateID": self.id, "term": self.currentTerm, "lastLogIndex": len(self.log), "lastLogTerm": None,
-                   "type": "requestVote", "leader": self.id, 'vote': False}
+                   "type": "requestVote", "leader": self.leaderID, 'vote': False}
         self.send(message)
         self.received_votes += 1
         self.reset_timeout()
